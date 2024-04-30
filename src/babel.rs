@@ -1,4 +1,4 @@
-use std::{path::Display, str::FromStr};
+use std::str::FromStr;
 
 use crate::assembly::{Assembly, Comp, Dest, Jump};
 
@@ -12,9 +12,10 @@ impl Babel {
     }
 
     pub fn translate(&mut self, cmd: &Command) -> Vec<Assembly> {
+        let mut translator = Translation::new();
         match cmd {
             Command::Push(Segment::Constant, x) => {
-                vec![
+                translator.with_asm([
                     Assembly::comment(format!("{cmd:?}")),
                     // @x // where x is a constant
                     Assembly::Address(*x as u32),
@@ -30,10 +31,10 @@ impl Babel {
                     Assembly::sp(),
                     // M = M + 1
                     Assembly::assign(Dest::M, Comp::Mplus1),
-                ]
+                ]);
             }
             Command::Add => {
-                vec![
+                translator.with_asm([
                     Assembly::comment(format!("{cmd:?}")),
                     // Pop 1st value, put into D
                     // @SP
@@ -64,69 +65,83 @@ impl Babel {
                     Assembly::sp(),
                     // M = M + 1
                     Assembly::assign(Dest::M, Comp::Mplus1),
-                ]
+                ]);
             }
             Command::Equal => {
-                self.counter += 1;
-                vec![
-                    // @SP
-                    Assembly::sp(),
-                    // M = M - 1 // Decrement to go to next value
-                    Assembly::assign(Dest::M, Comp::Mminus1),
-                    // A = M
-                    Assembly::assign(Dest::A, Comp::M),
-                    // D = M
-                    Assembly::assign(Dest::D, Comp::M),
-                    // @SP
-                    Assembly::sp(),
-                    // M = M - 1
-                    Assembly::assign(Dest::M, Comp::Mminus1),
-                    // A = M
-                    Assembly::assign(Dest::A, Comp::M),
-                    // @EQ{counter}
-                    Assembly::addr_sym(format!("@EQ{}", self.counter)),
-                    // D = D - M; JEQ
-                    Assembly::Command {
-                        dest: Some(Dest::D),
-                        comp: Comp::DminusM,
-                        jump: Some(Jump::JEQ),
-                    },
-                    // @32767 // -1
-                    Assembly::Address(32767),
-                    // D = A
-                    Assembly::assign(Dest::D, Comp::A),
-                    // @SP
-                    Assembly::sp(),
-                    // A = M
-                    Assembly::assign(Dest::A, Comp::M),
-                    // M = D
-                    Assembly::assign(Dest::M, Comp::D),
-                    // @AFTER{counter}
-                    Assembly::addr_sym(format!("AFTER{}", self.counter)),
-                    // 0;JMP
-                    Assembly::Command {
-                        dest: None,
-                        comp: Comp::Zero,
-                        jump: Some(Jump::JMP),
-                    },
-                    // (EQ{counter}) // D = 0 here
-                    Assembly::label(format!("EQ{}", self.counter)),
-                    // @SP
-                    Assembly::sp(),
-                    // A = M
-                    Assembly::assign(Dest::A, Comp::M),
-                    // M = D
-                    Assembly::assign(Dest::M, Comp::D),
-                    // (AFTER{counter})
-                    Assembly::label(format!("AFTER{}", self.counter)),
-                    // @SP
-                    Assembly::sp(),
-                    // M = M + 1
-                    Assembly::assign(Dest::M, Comp::Mplus1),
-                ]
+                translator.ord_asm(&mut self.counter, Jump::JEQ);
+                // self.counter += 1;
+                // translator.with_asm([
+                //     // @SP
+                //     Assembly::sp(),
+                //     // M = M - 1 // Decrement to go to next value
+                //     Assembly::assign(Dest::M, Comp::Mminus1),
+                //     // A = M
+                //     Assembly::assign(Dest::A, Comp::M),
+                //     // D = M
+                //     Assembly::assign(Dest::D, Comp::M),
+                //     // @SP
+                //     Assembly::sp(),
+                //     // M = M - 1
+                //     Assembly::assign(Dest::M, Comp::Mminus1),
+                //     // A = M
+                //     Assembly::assign(Dest::A, Comp::M),
+                //     // @EQ{counter}
+                //     Assembly::addr_sym(format!("@EQ{}", self.counter)),
+                //     // D = D - M; JEQ
+                //     Assembly::Command {
+                //         dest: Some(Dest::D),
+                //         comp: Comp::DminusM,
+                //         jump: Some(Jump::JEQ),
+                //     },
+                //     // @32767 // -1
+                //     Assembly::Address(32767),
+                //     // D = A
+                //     Assembly::assign(Dest::D, Comp::A),
+                //     // @SP
+                //     Assembly::sp(),
+                //     // A = M
+                //     Assembly::assign(Dest::A, Comp::M),
+                //     // M = D
+                //     Assembly::assign(Dest::M, Comp::D),
+                //     // @AFTER{counter}
+                //     Assembly::addr_sym(format!("AFTER{}", self.counter)),
+                //     // 0;JMP
+                //     Assembly::Command {
+                //         dest: None,
+                //         comp: Comp::Zero,
+                //         jump: Some(Jump::JMP),
+                //     },
+                //     // (EQ{counter}) // D = 0 here
+                //     Assembly::label(format!("EQ{}", self.counter)),
+                //     // @SP
+                //     Assembly::sp(),
+                //     // A = M
+                //     Assembly::assign(Dest::A, Comp::M),
+                //     // M = D
+                //     Assembly::assign(Dest::M, Comp::D),
+                //     // (AFTER{counter})
+                //     Assembly::label(format!("AFTER{}", self.counter)),
+                //     // @SP
+                //     Assembly::sp(),
+                //     // M = M + 1
+                //     Assembly::assign(Dest::M, Comp::Mplus1),
+                // ]);
+            }
+            Command::LessThan => {
+                translator.ord_asm(&mut self.counter, Jump::JLT);
+            }
+            Command::GreaterThan => {
+                translator.ord_asm(&mut self.counter, Jump::JGT);
+            }
+            Command::Negate => {
+                todo!()
+            }
+            Command::Not => {
+                todo!()
             }
             _ => todo!(),
         }
+        translator.0
     }
 }
 
@@ -151,6 +166,81 @@ impl Translation {
         I: IntoIterator<Item = Assembly>,
     {
         self.0.extend(iter);
+        self
+    }
+
+    fn unary_asm(&mut self, m_comp: Comp) -> &mut Self {
+        self.with_asm([
+            Assembly::comment(format!("Unary {}", m_comp)),
+            // @SP
+            Assembly::sp(),
+            // A = M
+            Assembly::assign(Dest::A, Comp::M),
+            // M = UnaryOperator(M)
+            Assembly::assign(Dest::M, m_comp),
+        ]);
+        self
+    }
+
+    /// Generate assembly for Ordinal functions like equal, less than, greater than
+    fn ord_asm(&mut self, counter: &mut usize, jump: Jump) -> &mut Self {
+        *counter += 1;
+        self.with_asm([
+            // @SP
+            Assembly::sp(),
+            // M = M - 1 // Decrement to go to next value
+            Assembly::assign(Dest::M, Comp::Mminus1),
+            // A = M
+            Assembly::assign(Dest::A, Comp::M),
+            // D = M
+            Assembly::assign(Dest::D, Comp::M),
+            // @SP
+            Assembly::sp(),
+            // M = M - 1
+            Assembly::assign(Dest::M, Comp::Mminus1),
+            // A = M
+            Assembly::assign(Dest::A, Comp::M),
+            // @EQ{counter}
+            Assembly::addr_sym(format!("@{}{}", jump, counter)),
+            // D = D - M; JEQ
+            Assembly::Command {
+                dest: Some(Dest::D),
+                comp: Comp::DminusM,
+                jump: Some(jump),
+            },
+            // @32767 // -1
+            Assembly::Address(32767),
+            // D = A
+            Assembly::assign(Dest::D, Comp::A),
+            // @SP
+            Assembly::sp(),
+            // A = M
+            Assembly::assign(Dest::A, Comp::M),
+            // M = D
+            Assembly::assign(Dest::M, Comp::D),
+            // @AFTER{counter}
+            Assembly::addr_sym(format!("AFTER{}", counter)),
+            // 0;JMP
+            Assembly::Command {
+                dest: None,
+                comp: Comp::Zero,
+                jump: Some(Jump::JMP),
+            },
+            // (EQ{counter}) // D = 0 here
+            Assembly::label(format!("{}{}", jump, counter)),
+            // @SP
+            Assembly::sp(),
+            // A = M
+            Assembly::assign(Dest::A, Comp::M),
+            // M = D
+            Assembly::assign(Dest::M, Comp::D),
+            // (AFTER{counter})
+            Assembly::label(format!("AFTER{}", counter)),
+            // @SP
+            Assembly::sp(),
+            // M = M + 1
+            Assembly::assign(Dest::M, Comp::Mplus1),
+        ]);
         self
     }
 
@@ -202,7 +292,6 @@ impl Translation {
     }
 }
 
-
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Push(Segment, i32),
@@ -245,7 +334,7 @@ impl FromStr for Command {
             Some("add") => Ok(Command::Add),
             Some("sub") => Ok(Command::Subtract),
             Some("eq") => Ok(Command::Equal),
-            _ => panic!("Not valid: {}", s),
+            _ => Err(ParseError::InvalidCommand(format!("Not valid: {}", s))),
         }
     }
 }

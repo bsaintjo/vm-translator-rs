@@ -1,7 +1,4 @@
-use std::{
-    borrow::Cow,
-    fmt::Display,
-};
+use std::{borrow::Cow, fmt::Display};
 
 type StringLike = Cow<'static, str>;
 
@@ -108,6 +105,10 @@ pub enum Comp {
     DminusM,
     /// M - 1
     Mminus1,
+    /// -M
+    NegateM,
+    /// !M
+    NotM,
 }
 
 impl Display for Comp {
@@ -123,7 +124,7 @@ impl Display for Comp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Jump {
     JLE,
     JEQ,
