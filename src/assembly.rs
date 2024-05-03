@@ -2,7 +2,7 @@ use std::{borrow::Cow, fmt::Display};
 
 type StringLike = Cow<'static, str>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Assembly {
     Label(StringLike),
     Comment(StringLike),
@@ -71,7 +71,7 @@ impl Assembly {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Dest {
     M,
     D,
@@ -88,7 +88,7 @@ impl Display for Dest {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Comp {
     Zero,
     /// A
@@ -103,12 +103,20 @@ pub enum Comp {
     DplusM,
     /// D - M
     DminusM,
+    /// M - D
+    MminusD,
+    /// D - 1
+    Dminus1,
     /// M - 1
     Mminus1,
     /// -M
     NegateM,
     /// !M
     NotM,
+    /// D&M
+    DandM,
+    /// D|M
+    DorM,
 }
 
 impl Display for Comp {
@@ -118,7 +126,13 @@ impl Display for Comp {
             Comp::Mplus1 => write!(f, "M+1"),
             Comp::DplusM => write!(f, "D+M"),
             Comp::DminusM => write!(f, "D-M"),
+            Comp::MminusD => write!(f, "M-D"),
             Comp::Mminus1 => write!(f, "M-1"),
+            Comp::Dminus1 => write!(f, "D-1"),
+            Comp::NotM => write!(f, "!M"),
+            Comp::NegateM => write!(f, "-M"),
+            Comp::DandM => write!(f, "D&M"),
+            Comp::DorM => write!(f, "D|M"),
             _ => write!(f, "{self:?}"),
         }
     }

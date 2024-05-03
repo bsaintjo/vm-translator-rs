@@ -11,7 +11,7 @@ impl Babel {
         Self { counter: 0 }
     }
 
-    pub fn translate(&mut self, cmd: &Command) -> Vec<Assembly> {
+    pub fn translate(&mut self, cmd: &Command) -> Translation {
         let mut translator = Translation::new();
         match cmd {
             Command::Push(Segment::Constant, x) => {
@@ -35,7 +35,7 @@ impl Babel {
             }
             Command::Add => {
                 translator.with_asm([
-                    Assembly::comment(format!("{cmd:?}")),
+                    Assembly::comment("addition"),
                     // Pop 1st value, put into D
                     // @SP
                     Assembly::sp(),
@@ -67,89 +67,64 @@ impl Babel {
                     Assembly::assign(Dest::M, Comp::Mplus1),
                 ]);
             }
+            Command::Subtract => {
+                translator.push(Assembly::comment("subtract"));
+                translator.binary_asm(Comp::MminusD);
+            }
             Command::Equal => {
+                translator.push(Assembly::comment("equal"));
                 translator.ord_asm(&mut self.counter, Jump::JEQ);
-                // self.counter += 1;
-                // translator.with_asm([
-                //     // @SP
-                //     Assembly::sp(),
-                //     // M = M - 1 // Decrement to go to next value
-                //     Assembly::assign(Dest::M, Comp::Mminus1),
-                //     // A = M
-                //     Assembly::assign(Dest::A, Comp::M),
-                //     // D = M
-                //     Assembly::assign(Dest::D, Comp::M),
-                //     // @SP
-                //     Assembly::sp(),
-                //     // M = M - 1
-                //     Assembly::assign(Dest::M, Comp::Mminus1),
-                //     // A = M
-                //     Assembly::assign(Dest::A, Comp::M),
-                //     // @EQ{counter}
-                //     Assembly::addr_sym(format!("@EQ{}", self.counter)),
-                //     // D = D - M; JEQ
-                //     Assembly::Command {
-                //         dest: Some(Dest::D),
-                //         comp: Comp::DminusM,
-                //         jump: Some(Jump::JEQ),
-                //     },
-                //     // @32767 // -1
-                //     Assembly::Address(32767),
-                //     // D = A
-                //     Assembly::assign(Dest::D, Comp::A),
-                //     // @SP
-                //     Assembly::sp(),
-                //     // A = M
-                //     Assembly::assign(Dest::A, Comp::M),
-                //     // M = D
-                //     Assembly::assign(Dest::M, Comp::D),
-                //     // @AFTER{counter}
-                //     Assembly::addr_sym(format!("AFTER{}", self.counter)),
-                //     // 0;JMP
-                //     Assembly::Command {
-                //         dest: None,
-                //         comp: Comp::Zero,
-                //         jump: Some(Jump::JMP),
-                //     },
-                //     // (EQ{counter}) // D = 0 here
-                //     Assembly::label(format!("EQ{}", self.counter)),
-                //     // @SP
-                //     Assembly::sp(),
-                //     // A = M
-                //     Assembly::assign(Dest::A, Comp::M),
-                //     // M = D
-                //     Assembly::assign(Dest::M, Comp::D),
-                //     // (AFTER{counter})
-                //     Assembly::label(format!("AFTER{}", self.counter)),
-                //     // @SP
-                //     Assembly::sp(),
-                //     // M = M + 1
-                //     Assembly::assign(Dest::M, Comp::Mplus1),
-                // ]);
             }
             Command::LessThan => {
-                translator.ord_asm(&mut self.counter, Jump::JLT);
-            }
-            Command::GreaterThan => {
+                translator.push(Assembly::comment("less than"));
                 translator.ord_asm(&mut self.counter, Jump::JGT);
             }
+            Command::GreaterThan => {
+                translator.push(Assembly::comment("greater than"));
+                translator.ord_asm(&mut self.counter, Jump::JLT);
+            }
             Command::Negate => {
-                todo!()
+                translator.push(Assembly::comment("negation"));
+                translator.unary_asm(Comp::NegateM);
             }
             Command::Not => {
-                todo!()
+                translator.push(Assembly::comment("not"));
+                translator.unary_asm(Comp::NotM);
             }
-            _ => todo!(),
+            Command::And => {
+                translator.push(Assembly::comment("and cmd"));
+                translator.binary_asm(Comp::DandM);
+            }
+            Command::Or => {
+                translator.push(Assembly::comment("or cmd"));
+                translator.binary_asm(Comp::DorM);
+            }
+            _ => todo!("{cmd:?}"),
         }
-        translator.0
+        translator
     }
 }
 
-struct Translation(Vec<Assembly>);
+#[derive(Debug, Clone)]
+pub struct Translation(Vec<Assembly>);
 
 impl Translation {
     fn new() -> Self {
         Self(Vec::new())
+    }
+
+    pub fn finish() -> Self {
+        let mut t = Self::new();
+        t.with_asm([
+            Assembly::label("END"),
+            Assembly::addr_sym("END"),
+            Assembly::Command {
+                dest: None,
+                comp: Comp::Zero,
+                jump: Some(Jump::JMP),
+            },
+        ]);
+        t
     }
 
     fn push(&mut self, asm: Assembly) -> &mut Self {
@@ -174,10 +149,52 @@ impl Translation {
             Assembly::comment(format!("Unary {}", m_comp)),
             // @SP
             Assembly::sp(),
+            // M = M - 1 // Decrement to go to next value
+            Assembly::assign(Dest::M, Comp::Mminus1),
             // A = M
             Assembly::assign(Dest::A, Comp::M),
             // M = UnaryOperator(M)
             Assembly::assign(Dest::M, m_comp),
+            // @SP
+            Assembly::sp(),
+            // M = M + 1
+            Assembly::assign(Dest::M, Comp::Mplus1),
+        ]);
+        self
+    }
+
+    fn binary_asm(&mut self, dm_comp: Comp) -> &mut Self {
+        self.with_asm([
+            // Assembly::comment(format!("{cmd:?}")),
+            // Pop 1st value, put into D
+            // @SP
+            Assembly::sp(),
+            // M = M - 1 // Decrement to go to next value
+            Assembly::assign(Dest::M, Comp::Mminus1),
+            // A = M
+            Assembly::assign(Dest::A, Comp::M),
+            // D = M
+            Assembly::assign(Dest::D, Comp::M),
+            // @SP
+            Assembly::sp(),
+            // M = M - 1
+            Assembly::assign(Dest::M, Comp::Mminus1),
+            // Pop 2nd value, add to D
+            // A = M
+            Assembly::assign(Dest::A, Comp::M),
+            // D = D + M
+            Assembly::assign(Dest::D, dm_comp),
+            // Add value to stack
+            // @SP
+            Assembly::sp(),
+            // A = M
+            Assembly::assign(Dest::A, Comp::M),
+            // M = D // Addition on stack
+            Assembly::assign(Dest::M, Comp::D),
+            // @SP
+            Assembly::sp(),
+            // M = M + 1
+            Assembly::assign(Dest::M, Comp::Mplus1),
         ]);
         self
     }
@@ -200,16 +217,19 @@ impl Translation {
             Assembly::assign(Dest::M, Comp::Mminus1),
             // A = M
             Assembly::assign(Dest::A, Comp::M),
+            // D = D - M
+            Assembly::assign(Dest::D, Comp::DminusM),
             // @EQ{counter}
-            Assembly::addr_sym(format!("@{}{}", jump, counter)),
-            // D = D - M; JEQ
+            Assembly::addr_sym(format!("{:?}{}", jump, counter)),
+            // D; JEQ/JLT/etc.
             Assembly::Command {
-                dest: Some(Dest::D),
-                comp: Comp::DminusM,
+                dest: None,
+                comp: Comp::D,
                 jump: Some(jump),
             },
-            // @32767 // -1
-            Assembly::Address(32767),
+            // From here the condition is false
+            // @0
+            Assembly::Address(0),
             // D = A
             Assembly::assign(Dest::D, Comp::A),
             // @SP
@@ -227,13 +247,17 @@ impl Translation {
                 jump: Some(Jump::JMP),
             },
             // (EQ{counter}) // D = 0 here
-            Assembly::label(format!("{}{}", jump, counter)),
+            Assembly::label(format!("{:?}{}", jump, counter)),
+            // @0
+            Assembly::Address(0),
+            // D = A
+            Assembly::assign(Dest::D, Comp::A),
             // @SP
             Assembly::sp(),
             // A = M
             Assembly::assign(Dest::A, Comp::M),
             // M = D
-            Assembly::assign(Dest::M, Comp::D),
+            Assembly::assign(Dest::M, Comp::Dminus1),
             // (AFTER{counter})
             Assembly::label(format!("AFTER{}", counter)),
             // @SP
@@ -292,6 +316,16 @@ impl Translation {
     }
 }
 
+impl IntoIterator for Translation {
+    type Item = Assembly;
+
+    type IntoIter = std::vec::IntoIter<Assembly>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Push(Segment, i32),
@@ -309,9 +343,9 @@ pub enum Command {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {
-    #[error("not a valid command")]
+    #[error("not a valid command: {0}")]
     InvalidCommand(String),
-    #[error("not a valid segment")]
+    #[error("not a valid segment: {0}")]
     InvalidSegment(String),
 }
 
@@ -334,6 +368,12 @@ impl FromStr for Command {
             Some("add") => Ok(Command::Add),
             Some("sub") => Ok(Command::Subtract),
             Some("eq") => Ok(Command::Equal),
+            Some("lt") => Ok(Command::LessThan),
+            Some("gt") => Ok(Command::GreaterThan),
+            Some("neg") => Ok(Command::Negate),
+            Some("not") => Ok(Command::Not),
+            Some("or") => Ok(Command::Or),
+            Some("and") => Ok(Command::And),
             _ => Err(ParseError::InvalidCommand(format!("Not valid: {}", s))),
         }
     }
