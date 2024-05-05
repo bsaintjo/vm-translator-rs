@@ -33,39 +33,27 @@ impl Babel {
                     Assembly::assign(Dest::M, Comp::Mplus1),
                 ]);
             }
-            Command::Add => {
+            Command::Push(segment, x) => {
+                translator.comment(cmd);
                 translator.with_asm([
-                    Assembly::comment("addition"),
-                    // Pop 1st value, put into D
-                    // @SP
-                    Assembly::sp(),
-                    // M = M - 1 // Decrement to go to next value
-                    Assembly::assign(Dest::M, Comp::Mminus1),
-                    // A = M
-                    Assembly::assign(Dest::A, Comp::M),
-                    // D = M
+                    // @Segment
+                    segment.as_asm(),
+                    // D = A
                     Assembly::assign(Dest::D, Comp::M),
-                    // @SP
-                    Assembly::sp(),
-                    // M = M - 1
-                    Assembly::assign(Dest::M, Comp::Mminus1),
-                    // Pop 2nd value, add to D
-                    // A = M
-                    Assembly::assign(Dest::A, Comp::M),
-                    // D = D + M
-                    Assembly::assign(Dest::D, Comp::DplusM),
-                    // Add value to stack
-                    // @SP
-                    Assembly::sp(),
-                    // A = M
-                    Assembly::assign(Dest::A, Comp::M),
-                    // M = D // Addition on stack
-                    Assembly::assign(Dest::M, Comp::D),
-                    // @SP
-                    Assembly::sp(),
-                    // M = M + 1
-                    Assembly::assign(Dest::M, Comp::Mplus1),
+                    // @x
+                    Assembly::Address(*x as u32),
+                    // D = D + A
+                    Assembly::assign(Dest::D, Comp::DplusA),
+                    // A = D // TODO combine above into one later
+                    Assembly::assign(Dest::A, Comp::D),
                 ]);
+            }
+            Command::Pop(segment, x) => {
+                todo!()
+            }
+            Command::Add => {
+                translator.push(Assembly::comment("addition"));
+                translator.binary_asm(Comp::DplusM);
             }
             Command::Subtract => {
                 translator.push(Assembly::comment("subtract"));
@@ -395,6 +383,25 @@ enum Segment {
     R15,
 }
 
+impl Segment {
+    fn as_asm(&self) -> Assembly {
+        match self {
+            Segment::Stack => Assembly::sp(),
+            Segment::Pointer => todo!(),
+            Segment::Constant => todo!(),
+            Segment::Local => Assembly::local(),
+            Segment::Static => todo!(),
+            Segment::Argument => Assembly::argument(),
+            Segment::This => Assembly::this(),
+            Segment::That => Assembly::that(),
+            Segment::Temp => Assembly::temp(),
+            Segment::R13 => Assembly::reg13(),
+            Segment::R14 => Assembly::reg14(),
+            Segment::R15 => Assembly::reg15(),
+        }
+    }
+}
+
 impl FromStr for Segment {
     type Err = ParseError;
 
@@ -402,6 +409,10 @@ impl FromStr for Segment {
         match s {
             "constant" => Ok(Segment::Constant),
             "local" => Ok(Segment::Local),
+            "argument" => Ok(Segment::Argument),
+            "this" => Ok(Segment::This),
+            "that" => Ok(Segment::That),
+            "temp" => Ok(Segment::Temp),
             _ => Err(ParseError::InvalidSegment(s.to_string())),
         }
     }

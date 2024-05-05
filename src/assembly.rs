@@ -62,6 +62,38 @@ impl Assembly {
         Self::addr_sym("SP")
     }
 
+    pub fn local() -> Self {
+        Self::addr_sym("LCL")
+    }
+
+    pub fn argument() -> Self {
+        Self::addr_sym("ARG")
+    }
+
+    pub fn this() -> Self {
+        Self::addr_sym("THIS")
+    }
+
+    pub fn that() -> Self {
+        Self::addr_sym("THAT")
+    }
+
+    pub fn temp() -> Self {
+        Self::addr_sym("TEMP")
+    }
+
+    pub fn reg13() -> Self {
+        Self::addr_sym("@R13")
+    }
+
+    pub fn reg14() -> Self {
+        Self::addr_sym("@R14")
+    }
+
+    pub fn reg15() -> Self {
+        Self::addr_sym("@R15")
+    }
+
     pub fn assign(dest: Dest, comp: Comp) -> Self {
         Self::Command {
             dest: Some(dest),
@@ -101,6 +133,8 @@ pub enum Comp {
     Mplus1,
     /// D + M
     DplusM,
+    /// D + A
+    DplusA,
     /// D - M
     DminusM,
     /// M - D
@@ -125,6 +159,7 @@ impl Display for Comp {
             Comp::Zero => write!(f, "0"),
             Comp::Mplus1 => write!(f, "M+1"),
             Comp::DplusM => write!(f, "D+M"),
+            Comp::DplusA => write!(f, "D+A"),
             Comp::DminusM => write!(f, "D-M"),
             Comp::MminusD => write!(f, "M-D"),
             Comp::Mminus1 => write!(f, "M-1"),
