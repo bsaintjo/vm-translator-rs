@@ -83,15 +83,15 @@ impl Assembly {
     }
 
     pub fn reg13() -> Self {
-        Self::addr_sym("@R13")
+        Self::addr_sym("R13")
     }
 
     pub fn reg14() -> Self {
-        Self::addr_sym("@R14")
+        Self::addr_sym("R14")
     }
 
     pub fn reg15() -> Self {
-        Self::addr_sym("@R15")
+        Self::addr_sym("R15")
     }
 
     pub fn assign(dest: Dest, comp: Comp) -> Self {

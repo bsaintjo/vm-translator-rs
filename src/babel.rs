@@ -37,19 +37,71 @@ impl Babel {
                 translator.comment(cmd);
                 translator.with_asm([
                     // @Segment
-                    segment.as_asm(),
-                    // D = A
+                    segment.as_asm(*x as u32),
+                    // D = M // Store segment address in D
                     Assembly::assign(Dest::D, Comp::M),
                     // @x
                     Assembly::Address(*x as u32),
                     // D = D + A
                     Assembly::assign(Dest::D, Comp::DplusA),
-                    // A = D // TODO combine above into one later
+                    // A = D // Go to address of segment + offset
                     Assembly::assign(Dest::A, Comp::D),
+                    // Store that value into D register
+                    Assembly::assign(Dest::D, Comp::M),
+
+                    // Store D register into area pointed by stack pointer
+                    // @SP
+                    Assembly::sp(),
+                    // A = M // Go to location SP was pointing to
+                    Assembly::assign(Dest::A, Comp::M),
+                    // M = D
+                    Assembly::assign(Dest::M, Comp::D),
+
+                    // @SP
+                    Assembly::sp(),
+                    // M = M + 1
+                    Assembly::assign(Dest::M, Comp::Mplus1),
                 ]);
             }
             Command::Pop(segment, x) => {
-                todo!()
+                translator.comment(cmd);
+                // addr <- segment + offset
+                // Store addr in D register
+                translator.with_asm([
+                    // @Segment
+                    segment.as_asm(*x as u32),
+                    // D = M // Store segment address in D
+                    Assembly::assign(Dest::D, Comp::M),
+                    // @x
+                    Assembly::Address(*x as u32),
+                    // D = D + A
+                    Assembly::assign(Dest::D, Comp::DplusA),
+                    // A = D // Go to address of segment + offset
+                    Assembly::assign(Dest::A, Comp::D),
+                    // Store address into D register
+                    Assembly::assign(Dest::D, Comp::A),
+                    // Store address into R13 temp
+                    Assembly::reg13(),
+                    Assembly::assign(Dest::M, Comp::D),
+                ]);
+                // SP--
+                translator.with_asm([
+                    // @SP
+                    Assembly::sp(),
+                    // M = M - 1
+                    Assembly::assign(Dest::M, Comp::Mminus1),
+                    // D = M
+                    Assembly::assign(Dest::D, Comp::M),
+                ]);
+                // RAM[addr] <- RAM[SP]
+                translator.with_asm([
+                    // @R13
+                    Assembly::reg13(),
+                    // Go to address stored in register 13
+                    Assembly::assign(Dest::A, Comp::M),
+                    // Store D register value into Ram[A]
+                    Assembly::assign(Dest::M, Comp::D),
+                ]);
             }
             Command::Add => {
                 translator.push(Assembly::comment("addition"));
@@ -87,7 +139,7 @@ impl Babel {
                 translator.push(Assembly::comment("or cmd"));
                 translator.binary_asm(Comp::DorM);
             }
-            _ => todo!("{cmd:?}"),
+            // _ => unreachable!(),
         }
         translator
     }
@@ -188,6 +240,8 @@ impl Translation {
     }
 
     /// Generate assembly for Ordinal functions like equal, less than, greater than
+    /// 
+    /// Counter is used to generate unique jump locations
     fn ord_asm(&mut self, counter: &mut usize, jump: Jump) -> &mut Self {
         *counter += 1;
         self.with_asm([
@@ -256,52 +310,6 @@ impl Translation {
         self
     }
 
-    fn goto_sp(&mut self) -> &mut Self {
-        self.with_asm([
-            // @SP
-            Assembly::sp(),
-            // A = M // Go to location SP was pointing to
-            Assembly::assign(Dest::A, Comp::M),
-        ])
-    }
-
-    fn inc_sp(&mut self) -> &mut Self {
-        self.with_asm([
-            // @SP
-            Assembly::sp(),
-            // M = M + 1
-            Assembly::assign(Dest::M, Comp::Mplus1),
-        ])
-    }
-    fn dec_sp(&mut self) -> &mut Self {
-        self.with_asm([
-            // @SP
-            Assembly::sp(),
-            // M = M - 1
-            Assembly::assign(Dest::M, Comp::Mminus1),
-        ])
-    }
-
-    /// Go to value pointed by
-    // fn with_push<I>(&mut self, iter: I) -> &mut Self
-    // where
-    //     I: Iterator<Item = Assembly>,
-    // {
-    //     self.goto_sp().with_asm(iter).inc_sp()
-    // }
-
-    fn pop_d(&mut self) -> &mut Self {
-        self.with_asm([
-            // @SP
-            Assembly::sp(),
-            // M = M - 1
-            Assembly::assign(Dest::M, Comp::Mminus1),
-            // A = M
-            Assembly::assign(Dest::A, Comp::M),
-            // D = M
-            Assembly::assign(Dest::D, Comp::M),
-        ])
-    }
 }
 
 impl IntoIterator for Translation {
@@ -368,36 +376,28 @@ impl FromStr for Command {
 }
 
 #[derive(Debug, PartialEq)]
-enum Segment {
-    Stack,
-    Pointer,
-    Constant,
+pub enum Segment {
+    Argument,
     Local,
     Static,
-    Argument,
+    Constant,
     This,
     That,
+    Pointer,
     Temp,
-    R13,
-    R14,
-    R15,
 }
 
 impl Segment {
-    fn as_asm(&self) -> Assembly {
+    fn as_asm(&self, x: u32) -> Assembly {
         match self {
-            Segment::Stack => Assembly::sp(),
             Segment::Pointer => todo!(),
-            Segment::Constant => todo!(),
+            Segment::Constant => Assembly::Address(x),
             Segment::Local => Assembly::local(),
             Segment::Static => todo!(),
             Segment::Argument => Assembly::argument(),
             Segment::This => Assembly::this(),
             Segment::That => Assembly::that(),
             Segment::Temp => Assembly::temp(),
-            Segment::R13 => Assembly::reg13(),
-            Segment::R14 => Assembly::reg14(),
-            Segment::R15 => Assembly::reg15(),
         }
     }
 }
@@ -407,11 +407,13 @@ impl FromStr for Segment {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "constant" => Ok(Segment::Constant),
-            "local" => Ok(Segment::Local),
             "argument" => Ok(Segment::Argument),
+            "local" => Ok(Segment::Local),
+            "static" => Ok(Segment::Static),
+            "constant" => Ok(Segment::Constant),
             "this" => Ok(Segment::This),
             "that" => Ok(Segment::That),
+            "pointer" => Ok(Segment::Pointer),
             "temp" => Ok(Segment::Temp),
             _ => Err(ParseError::InvalidSegment(s.to_string())),
         }
