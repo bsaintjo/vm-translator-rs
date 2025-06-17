@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use crate::assembly::{Assembly, Comp, Dest, Jump};
+use crate::segment::{self, Segment, SegmentType};
 
 pub struct Babel {
     counter: usize,
@@ -14,7 +15,10 @@ impl Babel {
     pub fn translate(&mut self, cmd: &Command) -> Translation {
         let mut translator = Translation::new();
         match cmd {
-            Command::Push(Segment::Constant, x) => {
+            Command::Push(segment::Segment {
+                segment: segment::SegmentType::Constant,
+                index: x,
+            }) => {
                 translator.with_asm([
                     Assembly::comment(format!("{cmd:?}")),
                     // @x // where x is a constant
@@ -33,22 +37,29 @@ impl Babel {
                     Assembly::assign(Dest::M, Comp::Mplus1),
                 ]);
             }
-            Command::Push(segment, x) => {
+            Command::Push(segment)
+                if matches!(
+                    segment.segment,
+                    SegmentType::Local
+                        | SegmentType::Argument
+                        | SegmentType::This
+                        | SegmentType::That
+                ) =>
+            {
                 translator.comment(cmd);
                 translator.with_asm([
                     // @Segment
-                    segment.as_asm(*x as u32),
+                    segment.as_asm(),
                     // D = M // Store segment address in D
                     Assembly::assign(Dest::D, Comp::M),
                     // @x
-                    Assembly::Address(*x as u32),
+                    Assembly::Address(segment.index as u32),
                     // D = D + A
                     Assembly::assign(Dest::D, Comp::DplusA),
                     // A = D // Go to address of segment + offset
                     Assembly::assign(Dest::A, Comp::D),
                     // Store that value into D register
                     Assembly::assign(Dest::D, Comp::M),
-
                     // Store D register into area pointed by stack pointer
                     // @SP
                     Assembly::sp(),
@@ -56,34 +67,87 @@ impl Babel {
                     Assembly::assign(Dest::A, Comp::M),
                     // M = D
                     Assembly::assign(Dest::M, Comp::D),
-
                     // @SP
                     Assembly::sp(),
                     // M = M + 1
                     Assembly::assign(Dest::M, Comp::Mplus1),
                 ]);
             }
-            Command::Pop(segment, x) => {
+            Command::Pop(
+                segment @ Segment {
+                    segment: SegmentType::Temp,
+                    ..
+                },
+            ) => {
+                // STORE TEMP(5 + i) into D register
+                translator.with_asm([
+                    Assembly::Address(5),
+                    Assembly::assign(Dest::D, Comp::A),
+                    Assembly::Address(segment.index as u32),
+                    Assembly::assign(Dest::D, Comp::DplusA),
+                    Assembly::assign(Dest::A, Comp::D),
+                    Assembly::assign(Dest::D, Comp::M),
+                ]);
+                // Store address into reg13
+                translator.store_dreg_in_reg13();
+                // Store SP into D register and decrement
+                translator.with_asm([
+                    // @SP
+                    Assembly::sp(),
+                    // M = M - 1
+                    Assembly::assign(Dest::M, Comp::Mminus1),
+                    // D = M
+                    Assembly::assign(Dest::D, Comp::M),
+                ]);
+                // Store D Register into RAM[reg13]
+                translator.with_asm([
+                    Assembly::reg13(),
+                    Assembly::assign(Dest::A, Comp::M),
+                    Assembly::assign(Dest::M, Comp::D),
+                ]);
+            }
+            Command::Push(
+                segment @ Segment {
+                    segment: SegmentType::Temp,
+                    ..
+                },
+            ) => {
+                translator.comment(cmd);
+                // Store TEMP=(5 + i) into D Register
+                translator.with_asm([
+                    Assembly::Address(5),
+                    Assembly::assign(Dest::D, Comp::A),
+                    Assembly::Address(segment.index as u32),
+                    Assembly::assign(Dest::D, Comp::DplusA),
+                    Assembly::assign(Dest::A, Comp::D),
+                    Assembly::assign(Dest::D, Comp::M),
+                ]);
+                // Store D register into area pointed by stack pointer
+                translator.push_dreg_onto_stack_and_increment_sp();
+            }
+            Command::Push(..) => {
+                todo!()
+            }
+            Command::Pop(segment) => {
                 translator.comment(cmd);
                 // addr <- segment + offset
                 // Store addr in D register
                 translator.with_asm([
                     // @Segment
-                    segment.as_asm(*x as u32),
+                    segment.as_asm(),
                     // D = M // Store segment address in D
                     Assembly::assign(Dest::D, Comp::M),
                     // @x
-                    Assembly::Address(*x as u32),
+                    Assembly::Address(segment.index as u32),
                     // D = D + A
                     Assembly::assign(Dest::D, Comp::DplusA),
                     // A = D // Go to address of segment + offset
                     Assembly::assign(Dest::A, Comp::D),
                     // Store address into D register
                     Assembly::assign(Dest::D, Comp::A),
-                    // Store address into R13 temp
-                    Assembly::reg13(),
-                    Assembly::assign(Dest::M, Comp::D),
                 ]);
+                // Store address into R13 temp
+                translator.store_dreg_in_reg13();
                 // SP--
                 translator.with_asm([
                     // @SP
@@ -138,8 +202,7 @@ impl Babel {
             Command::Or => {
                 translator.push(Assembly::comment("or cmd"));
                 translator.binary_asm(Comp::DorM);
-            }
-            // _ => unreachable!(),
+            } // _ => unreachable!(),
         }
         translator
     }
@@ -151,6 +214,30 @@ pub struct Translation(Vec<Assembly>);
 impl Translation {
     fn new() -> Self {
         Self(Vec::new())
+    }
+
+    pub fn store_dreg_in_reg13(&mut self) {
+        self.with_asm([
+            //@R13
+            Assembly::reg13(),
+            // M = D
+            Assembly::assign(Dest::M, Comp::D),
+        ]);
+    }
+
+    pub fn push_dreg_onto_stack_and_increment_sp(&mut self) {
+        self.with_asm([
+            // @SP
+            Assembly::sp(),
+            // A = M // Go to location SP was pointing to
+            Assembly::assign(Dest::A, Comp::M),
+            // M = D
+            Assembly::assign(Dest::M, Comp::D),
+            // @SP
+            Assembly::sp(),
+            // M = M + 1
+            Assembly::assign(Dest::M, Comp::Mplus1),
+        ]);
     }
 
     pub fn finish() -> Self {
@@ -240,7 +327,7 @@ impl Translation {
     }
 
     /// Generate assembly for Ordinal functions like equal, less than, greater than
-    /// 
+    ///
     /// Counter is used to generate unique jump locations
     fn ord_asm(&mut self, counter: &mut usize, jump: Jump) -> &mut Self {
         *counter += 1;
@@ -309,7 +396,6 @@ impl Translation {
         ]);
         self
     }
-
 }
 
 impl IntoIterator for Translation {
@@ -324,8 +410,8 @@ impl IntoIterator for Translation {
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
-    Push(Segment, i32),
-    Pop(Segment, i32),
+    Push(segment::Segment),
+    Pop(segment::Segment),
     Add,
     Subtract,
     Negate,
@@ -352,14 +438,14 @@ impl FromStr for Command {
         let mut ss = s.split_ascii_whitespace();
         match ss.next() {
             Some("push") => {
-                let segment = ss.next().unwrap().parse::<Segment>()?;
+                let segment = ss.next().unwrap().parse::<segment::SegmentType>()?;
                 let location = ss.next().unwrap().parse::<i32>().unwrap();
-                Ok(Command::Push(segment, location))
+                Ok(Command::Push(segment::Segment::new(segment, location)))
             }
             Some("pop") => {
-                let segment = ss.next().unwrap().parse::<Segment>()?;
+                let segment = ss.next().unwrap().parse::<segment::SegmentType>()?;
                 let location = ss.next().unwrap().parse::<i32>().unwrap();
-                Ok(Command::Pop(segment, location))
+                Ok(Command::Pop(segment::Segment::new(segment, location)))
             }
             Some("add") => Ok(Command::Add),
             Some("sub") => Ok(Command::Subtract),
@@ -375,64 +461,21 @@ impl FromStr for Command {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Segment {
-    Argument,
-    Local,
-    Static,
-    Constant,
-    This,
-    That,
-    Pointer,
-    Temp,
-}
-
-impl Segment {
-    fn as_asm(&self, x: u32) -> Assembly {
-        match self {
-            Segment::Pointer => todo!(),
-            Segment::Constant => Assembly::Address(x),
-            Segment::Local => Assembly::local(),
-            Segment::Static => todo!(),
-            Segment::Argument => Assembly::argument(),
-            Segment::This => Assembly::this(),
-            Segment::That => Assembly::that(),
-            Segment::Temp => Assembly::temp(),
-        }
-    }
-}
-
-impl FromStr for Segment {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "argument" => Ok(Segment::Argument),
-            "local" => Ok(Segment::Local),
-            "static" => Ok(Segment::Static),
-            "constant" => Ok(Segment::Constant),
-            "this" => Ok(Segment::This),
-            "that" => Ok(Segment::That),
-            "pointer" => Ok(Segment::Pointer),
-            "temp" => Ok(Segment::Temp),
-            _ => Err(ParseError::InvalidSegment(s.to_string())),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
+    use crate::segment::Segment;
+
     use super::*;
 
     #[test]
     fn test_parse() {
         assert_eq!(
             "push constant 5".parse::<Command>().unwrap(),
-            Command::Push(Segment::Constant, 5)
+            Command::Push(Segment::new(SegmentType::Constant, 5))
         );
         assert_eq!(
             "pop local 7".parse::<Command>().unwrap(),
-            Command::Pop(Segment::Local, 7)
+            Command::Pop(Segment::new(SegmentType::Local, 7))
         );
         assert_eq!("add".parse::<Command>().unwrap(), Command::Add);
     }

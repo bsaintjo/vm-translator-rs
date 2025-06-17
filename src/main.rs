@@ -2,6 +2,7 @@
 mod assembly;
 mod parse;
 mod babel;
+mod segment;
 
 use std::{
     env,

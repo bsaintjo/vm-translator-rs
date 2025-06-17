@@ -78,10 +78,6 @@ impl Assembly {
         Self::addr_sym("THAT")
     }
 
-    pub fn temp() -> Self {
-        Self::addr_sym("TEMP")
-    }
-
     pub fn reg13() -> Self {
         Self::addr_sym("R13")
     }
