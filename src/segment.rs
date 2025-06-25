@@ -2,14 +2,30 @@ use std::str::FromStr;
 
 use crate::{assembly::Assembly, babel::ParseError};
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SegmentType {
-    Argument,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LATT {
     Local,
-    Static,
-    Constant,
+    Argument,
     This,
     That,
+}
+
+impl LATT {
+    pub fn as_asm(self) -> Assembly {
+        match self {
+            LATT::Local => Assembly::local(),
+            LATT::Argument => Assembly::argument(),
+            LATT::This => Assembly::this(),
+            LATT::That => Assembly::that(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SegmentType {
+    LATT(LATT),
+    Static,
+    Constant,
     Pointer,
     Temp,
 }
@@ -24,19 +40,6 @@ impl Segment {
     pub fn new(segment: SegmentType, index: i32) -> Self {
         Self { segment, index }
     }
-
-    pub(crate) fn as_asm(&self) -> Assembly {
-        match self.segment {
-            SegmentType::Pointer => todo!(),
-            SegmentType::Constant => Assembly::Address(self.index as u32),
-            SegmentType::Local => Assembly::local(),
-            SegmentType::Static => todo!(),
-            SegmentType::Argument => Assembly::argument(),
-            SegmentType::This => Assembly::this(),
-            SegmentType::That => Assembly::that(),
-            SegmentType::Temp => todo!()
-        }
-    }
 }
 
 impl FromStr for SegmentType {
@@ -44,12 +47,12 @@ impl FromStr for SegmentType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "argument" => Ok(SegmentType::Argument),
-            "local" => Ok(SegmentType::Local),
+            "argument" => Ok(SegmentType::LATT(LATT::Argument)),
+            "local" => Ok(SegmentType::LATT(LATT::Local)),
             "static" => Ok(SegmentType::Static),
             "constant" => Ok(SegmentType::Constant),
-            "this" => Ok(SegmentType::This),
-            "that" => Ok(SegmentType::That),
+            "this" => Ok(SegmentType::LATT(LATT::This)),
+            "that" => Ok(SegmentType::LATT(LATT::That)),
             "pointer" => Ok(SegmentType::Pointer),
             "temp" => Ok(SegmentType::Temp),
             _ => Err(ParseError::InvalidSegment(s.to_string())),

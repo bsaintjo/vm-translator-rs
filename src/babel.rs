@@ -1,26 +1,51 @@
 use std::str::FromStr;
 
-use crate::assembly::{Assembly, Comp, Dest, Jump};
-use crate::segment::{self, Segment, SegmentType};
+use crate::{
+    assembly::{Assembly, Comp, Dest, Jump},
+    latt::{pop_latt, push_latt},
+    pointer::{pop_pointer, push_pointer},
+    statics::{pop_static, push_static},
+    temp::push_temp,
+};
+use crate::{
+    segment::{self, Segment, SegmentType},
+    temp::pop_temp,
+};
 
 pub struct Babel {
     counter: usize,
+    basename: String,
 }
 
 impl Babel {
-    pub fn empty() -> Self {
-        Self { counter: 0 }
+    pub fn empty<S: Into<String>>(basename: S) -> Self {
+        Self {
+            counter: 0,
+            basename: basename.into(),
+        }
     }
 
     pub fn translate(&mut self, cmd: &Command) -> Translation {
         let mut translator = Translation::new();
+        translator.comment(cmd);
         match cmd {
-            Command::Push(segment::Segment {
-                segment: segment::SegmentType::Constant,
+            // Pointer
+            Command::Push(Segment {
+                segment: SegmentType::Pointer,
+                index,
+            }) => push_pointer(&mut translator, *index),
+
+            Command::Pop(Segment {
+                segment: SegmentType::Pointer,
+                index,
+            }) => pop_pointer(&mut translator, *index),
+
+            // Constant
+            Command::Push(Segment {
+                segment: SegmentType::Constant,
                 index: x,
             }) => {
                 translator.with_asm([
-                    Assembly::comment(format!("{cmd:?}")),
                     // @x // where x is a constant
                     Assembly::Address(*x as u32),
                     // D = A
@@ -37,136 +62,43 @@ impl Babel {
                     Assembly::assign(Dest::M, Comp::Mplus1),
                 ]);
             }
-            Command::Push(segment)
-                if matches!(
-                    segment.segment,
-                    SegmentType::Local
-                        | SegmentType::Argument
-                        | SegmentType::This
-                        | SegmentType::That
-                ) =>
-            {
-                translator.comment(cmd);
-                translator.with_asm([
-                    // @Segment
-                    segment.as_asm(),
-                    // D = M // Store segment address in D
-                    Assembly::assign(Dest::D, Comp::M),
-                    // @x
-                    Assembly::Address(segment.index as u32),
-                    // D = D + A
-                    Assembly::assign(Dest::D, Comp::DplusA),
-                    // A = D // Go to address of segment + offset
-                    Assembly::assign(Dest::A, Comp::D),
-                    // Store that value into D register
-                    Assembly::assign(Dest::D, Comp::M),
-                    // Store D register into area pointed by stack pointer
-                    // @SP
-                    Assembly::sp(),
-                    // A = M // Go to location SP was pointing to
-                    Assembly::assign(Dest::A, Comp::M),
-                    // M = D
-                    Assembly::assign(Dest::M, Comp::D),
-                    // @SP
-                    Assembly::sp(),
-                    // M = M + 1
-                    Assembly::assign(Dest::M, Comp::Mplus1),
-                ]);
-            }
-            Command::Pop(
-                segment @ Segment {
-                    segment: SegmentType::Temp,
-                    ..
-                },
-            ) => {
-                // STORE TEMP(5 + i) into D register
-                translator.with_asm([
-                    Assembly::Address(5),
-                    Assembly::assign(Dest::D, Comp::A),
-                    Assembly::Address(segment.index as u32),
-                    Assembly::assign(Dest::D, Comp::DplusA),
-                    Assembly::assign(Dest::A, Comp::D),
-                    Assembly::assign(Dest::D, Comp::M),
-                ]);
-                // Store address into reg13
-                translator.store_dreg_in_reg13();
-                // Store SP into D register and decrement
-                translator.with_asm([
-                    // @SP
-                    Assembly::sp(),
-                    // M = M - 1
-                    Assembly::assign(Dest::M, Comp::Mminus1),
-                    // D = M
-                    Assembly::assign(Dest::D, Comp::M),
-                ]);
-                // Store D Register into RAM[reg13]
-                translator.with_asm([
-                    Assembly::reg13(),
-                    Assembly::assign(Dest::A, Comp::M),
-                    Assembly::assign(Dest::M, Comp::D),
-                ]);
-            }
-            Command::Push(
-                segment @ Segment {
-                    segment: SegmentType::Temp,
-                    ..
-                },
-            ) => {
-                translator.comment(cmd);
-                // Store TEMP=(5 + i) into D Register
-                translator.with_asm([
-                    Assembly::Address(5),
-                    Assembly::assign(Dest::D, Comp::A),
-                    Assembly::Address(segment.index as u32),
-                    Assembly::assign(Dest::D, Comp::DplusA),
-                    Assembly::assign(Dest::A, Comp::D),
-                    Assembly::assign(Dest::D, Comp::M),
-                ]);
-                // Store D register into area pointed by stack pointer
-                translator.push_dreg_onto_stack_and_increment_sp();
-            }
-            Command::Push(..) => {
+
+            // Local/Argument/This/That
+            Command::Push(Segment {
+                segment: SegmentType::LATT(latt),
+                index,
+            }) => push_latt(&mut translator, *latt, *index as u32),
+            Command::Pop(Segment {
+                segment: SegmentType::LATT(latt),
+                index,
+            }) => pop_latt(&mut translator, *latt, *index as u32),
+
+            // TEMP
+            Command::Pop(Segment {
+                segment: SegmentType::Temp,
+                index,
+            }) => pop_temp(&mut translator, *index as u32),
+
+            Command::Push(Segment {
+                segment: SegmentType::Temp,
+                index,
+            }) => push_temp(&mut translator, *index as u32),
+
+            // Static
+            Command::Pop(Segment {
+                segment: SegmentType::Static,
+                index,
+            }) => pop_static(&mut translator, *index as u32, &self.basename),
+            Command::Push(Segment {
+                segment: SegmentType::Static,
+                index,
+            }) => push_static(&mut translator, *index as u32, &self.basename),
+
+            // Catch unimplemented
+            Command::Pop(..) => {
                 todo!()
             }
-            Command::Pop(segment) => {
-                translator.comment(cmd);
-                // addr <- segment + offset
-                // Store addr in D register
-                translator.with_asm([
-                    // @Segment
-                    segment.as_asm(),
-                    // D = M // Store segment address in D
-                    Assembly::assign(Dest::D, Comp::M),
-                    // @x
-                    Assembly::Address(segment.index as u32),
-                    // D = D + A
-                    Assembly::assign(Dest::D, Comp::DplusA),
-                    // A = D // Go to address of segment + offset
-                    Assembly::assign(Dest::A, Comp::D),
-                    // Store address into D register
-                    Assembly::assign(Dest::D, Comp::A),
-                ]);
-                // Store address into R13 temp
-                translator.store_dreg_in_reg13();
-                // SP--
-                translator.with_asm([
-                    // @SP
-                    Assembly::sp(),
-                    // M = M - 1
-                    Assembly::assign(Dest::M, Comp::Mminus1),
-                    // D = M
-                    Assembly::assign(Dest::D, Comp::M),
-                ]);
-                // RAM[addr] <- RAM[SP]
-                translator.with_asm([
-                    // @R13
-                    Assembly::reg13(),
-                    // Go to address stored in register 13
-                    Assembly::assign(Dest::A, Comp::M),
-                    // Store D register value into Ram[A]
-                    Assembly::assign(Dest::M, Comp::D),
-                ]);
-            }
+
             Command::Add => {
                 translator.push(Assembly::comment("addition"));
                 translator.binary_asm(Comp::DplusM);
@@ -202,7 +134,7 @@ impl Babel {
             Command::Or => {
                 translator.push(Assembly::comment("or cmd"));
                 translator.binary_asm(Comp::DorM);
-            } // _ => unreachable!(),
+            }
         }
         translator
     }
@@ -216,27 +148,36 @@ impl Translation {
         Self(Vec::new())
     }
 
+    pub fn store_sp_to_dreg(&mut self) {
+        self.with_asm([
+            Assembly::sp(),
+            Assembly::assign(Dest::A, Comp::M),
+            Assembly::assign(Dest::D, Comp::M),
+        ]);
+    }
+
+    pub fn store_dreg_to_sp(&mut self) {
+        self.with_asm([
+            Assembly::sp(),
+            Assembly::assign(Dest::A, Comp::M),
+            Assembly::assign(Dest::M, Comp::D),
+        ]);
+    }
+
+    pub fn increment_sp(&mut self) {
+        self.with_asm([Assembly::sp(), Assembly::assign(Dest::M, Comp::Mplus1)]);
+    }
+
+    pub fn decrement_sp(&mut self) {
+        self.with_asm([Assembly::sp(), Assembly::assign(Dest::M, Comp::Mminus1)]);
+    }
+
     pub fn store_dreg_in_reg13(&mut self) {
         self.with_asm([
             //@R13
             Assembly::reg13(),
             // M = D
             Assembly::assign(Dest::M, Comp::D),
-        ]);
-    }
-
-    pub fn push_dreg_onto_stack_and_increment_sp(&mut self) {
-        self.with_asm([
-            // @SP
-            Assembly::sp(),
-            // A = M // Go to location SP was pointing to
-            Assembly::assign(Dest::A, Comp::M),
-            // M = D
-            Assembly::assign(Dest::M, Comp::D),
-            // @SP
-            Assembly::sp(),
-            // M = M + 1
-            Assembly::assign(Dest::M, Comp::Mplus1),
         ]);
     }
 
@@ -263,7 +204,7 @@ impl Translation {
         self.push(Assembly::comment(format!("{cmd:?}")))
     }
 
-    fn with_asm<I>(&mut self, iter: I) -> &mut Self
+    pub fn with_asm<I>(&mut self, iter: I) -> &mut Self
     where
         I: IntoIterator<Item = Assembly>,
     {
@@ -463,7 +404,7 @@ impl FromStr for Command {
 
 #[cfg(test)]
 mod test {
-    use crate::segment::Segment;
+    use crate::segment::{Segment, LATT};
 
     use super::*;
 
@@ -475,7 +416,7 @@ mod test {
         );
         assert_eq!(
             "pop local 7".parse::<Command>().unwrap(),
-            Command::Pop(Segment::new(SegmentType::Local, 7))
+            Command::Pop(Segment::new(SegmentType::LATT(LATT::Local), 7))
         );
         assert_eq!("add".parse::<Command>().unwrap(), Command::Add);
     }

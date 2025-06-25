@@ -7,7 +7,7 @@ pub enum Assembly {
     Label(StringLike),
     Comment(StringLike),
     Address(u32),
-    AddressSymbol(StringLike),
+    VariableSymbol(StringLike),
     Command {
         dest: Option<Dest>,
         comp: Comp,
@@ -21,7 +21,7 @@ impl Display for Assembly {
             Assembly::Label(s) => write!(f, "({s})"),
             Assembly::Comment(s) => write!(f, "// {s}"),
             Assembly::Address(a) => write!(f, "@{a}"),
-            Assembly::AddressSymbol(a) => write!(f, "@{a}"),
+            Assembly::VariableSymbol(a) => write!(f, "@{a}"),
             Assembly::Command { dest, comp, jump } => {
                 if let Some(dest) = dest {
                     dest.fmt(f)?;
@@ -55,7 +55,7 @@ impl Assembly {
     where
         S: Into<StringLike>,
     {
-        Self::AddressSymbol(s.into())
+        Self::VariableSymbol(s.into())
     }
 
     pub fn sp() -> Self {

@@ -1,8 +1,12 @@
 #![allow(non_snake_case)]
 mod assembly;
-mod parse;
 mod babel;
+mod latt;
+mod parse;
+mod pointer;
 mod segment;
+mod temp;
+mod statics;
 
 use std::{
     env,
@@ -16,7 +20,13 @@ use babel::Translation;
 use crate::babel::{Babel, Command};
 
 fn run<P: AsRef<Path>>(path: P) -> eyre::Result<()> {
-    let mut babel = Babel::empty();
+    let basename = path
+        .as_ref()
+        .file_stem()
+        .ok_or(eyre::eyre!("Not a file"))?
+        .to_str()
+        .ok_or(eyre::eyre!("Invalid filename bytes"))?;
+    let mut babel = Babel::empty(basename);
     let reader = BufReader::new(File::open(path)?);
     for line in reader.lines() {
         let line = line?;
