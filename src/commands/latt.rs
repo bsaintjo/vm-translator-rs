@@ -1,7 +1,7 @@
 use crate::{
     assembly::{Assembly, Comp, Dest},
     babel::Translation,
-    segment::LATT,
+    commands::segment::LATT,
 };
 
 pub fn push_latt(translator: &mut Translation, latt: LATT, index: u32) {

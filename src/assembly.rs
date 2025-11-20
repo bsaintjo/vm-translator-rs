@@ -1,6 +1,6 @@
-use std::{borrow::Cow, fmt::Display};
+use std::fmt::Display;
 
-type StringLike = Cow<'static, str>;
+use crate::utils::StringLike;
 
 #[derive(Debug, Clone)]
 pub enum Assembly {

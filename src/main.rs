@@ -1,12 +1,8 @@
 #![allow(non_snake_case)]
 mod assembly;
 mod babel;
-mod latt;
-mod parse;
-mod pointer;
-mod segment;
-mod temp;
-mod statics;
+mod commands;
+mod utils;
 
 use std::{
     env,
@@ -17,7 +13,7 @@ use std::{
 
 use babel::Translation;
 
-use crate::babel::{Babel, Command};
+use crate::{babel::Babel, commands::Command};
 
 fn run<P: AsRef<Path>>(path: P) -> eyre::Result<()> {
     let basename = path
@@ -30,7 +26,7 @@ fn run<P: AsRef<Path>>(path: P) -> eyre::Result<()> {
     let reader = BufReader::new(File::open(path)?);
     for line in reader.lines() {
         let line = line?;
-        if let Some(line) = parse::remove_whitespace_comments(&line) {
+        if let Some(line) = utils::remove_whitespace_comments(&line) {
             let cmd = line.parse::<Command>()?;
             let asm = babel.translate(&cmd);
             for instruction in asm {

@@ -9,7 +9,6 @@ pub fn push_temp(translator: &mut Translation, index: u32) {
         // Store TEMP[i] into D
         Assembly::Address(temp_loc),
         Assembly::assign(Dest::D, Comp::M),
-
     ]);
     translator.store_dreg_to_sp();
     translator.increment_sp();
